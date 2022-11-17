@@ -10,9 +10,11 @@ const ticker = {
 	bitmex: {
 		XBTUSD: 0,
 		XBTUSDT: 0,
-	}
+	},
+	deribit: {
+		'BTC-PERPETUAL': 0,
+	},
 };
-
 
 function usdFormat(num) {
 	return new Intl.NumberFormat(`en-US`, { currency: `USD`, style: 'currency' }).format(num);
@@ -64,40 +66,52 @@ initBitmex('XBTUSDT');
 initBitmex('XBTUSDTZ22');
 initBitmex('XBTUSDTH23');
 
-// let deribitPairs = [];
-// //ticker.{instrument_name}.100ms
-
-// const wsDeribit = new WebSocket('wss://www.deribit.com/ws/api/v2');
-// wsDeribit.onopen = () => {
-// 	console.log('onopen deribit:')
-// 	wsDeribit.send(JSON.stringify({
-// 		jsonrpc: '2.0',
-// 		id: 1004,
-// 		method: 'public/get_instruments',
-// 		params: {
-// 			currency: 'BTC',
-// 			kind: 'future',
-// 			expired: false
-// 		}
-// 	}));
-// };
-// wsDeribit.onmessage = m => {
-// 	const parsed = JSON.parse(m.data);
-// 	console.log('deribit onmessage:', parsed)
-// 	if (parsed.id === 1004) {
-// 		deribitPairs = parsed.result.map(i => `ticker.${i.instrument_name}.100ms`);
-
-// 		console.log('deribitPairs:',deribitPairs);
-
-// 		wsDeribit.send(JSON.stringify({
-// 			jsonrpc : '2.0',
-// 			id : 1005,
-// 			method : 'public/subscribe',
-// 			params : {
-// 				channels : [
-// 					'deribit_price_index.btc_usd'
-// 				]
-// 			}
-// 		}))
-// 	}
-// };
+let deribitPairs = [];
+const wsDeribit = new WebSocket('wss://www.deribit.com/ws/api/v2');
+wsDeribit.onopen = () => {
+	console.log('onopen deribit:')
+	wsDeribit.send(JSON.stringify({
+		jsonrpc: '2.0',
+		id: 1004,
+		method: 'public/get_instruments',
+		params: {
+			currency: 'BTC',
+			kind: 'future',
+			expired: false
+		}
+	}));
+};
+wsDeribit.onmessage = m => {
+	const parsed = JSON.parse(m.data);
+	if (parsed.id === 1004) {
+		deribitPairs = parsed.result.map(i => `ticker.${i.instrument_name}.100ms`);
+		wsDeribit.send(JSON.stringify({
+			jsonrpc : '2.0',
+			id : 1005,
+			method : 'public/subscribe',
+			params : {
+				channels : deribitPairs
+			}
+		}))
+	} else if (parsed.method === 'subscription') {
+		const o = parsed.params.data;
+		if (!o) return;
+		document.querySelector(`.ticker .${o.instrument_name} span`).textContent = usdFormat(o.last_price);
+		if (o.instrument_name === 'BTC-PERPETUAL') {
+			ticker.deribit['BTC-PERPETUAL'] = o.last_price;
+		} else {
+			const perp = ticker.deribit['BTC-PERPETUAL'];
+			if (perp) {
+				const premium = (1 - perp / o.last_price) * 100;
+				if (premium < 0) {
+					document.querySelector(`.ticker .${o.instrument_name} u`).classList.remove('red');
+					document.querySelector(`.ticker .${o.instrument_name} u`).classList.add('green');
+				} else {
+					document.querySelector(`.ticker .${o.instrument_name} u`).classList.remove('green');
+					document.querySelector(`.ticker .${o.instrument_name} u`).classList.add('red');
+				}
+				document.querySelector(`.ticker .${o.instrument_name} u`).textContent = `${premium.toFixed(3)}%`;
+			}
+		}
+	}
+};
